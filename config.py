@@ -26,7 +26,7 @@ TEMP_DIR.mkdir(exist_ok=True)
 # =============================================================================
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 BOT_PREFIX = os.getenv("BOT_PREFIX", "!")
-OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+OWNER_ID = int(os.getenv("OWNER_ID", "0")) if os.getenv("OWNER_ID") else 0
 
 # =============================================================================
 # AI API SETTINGS
@@ -34,9 +34,9 @@ OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# AI Model Settings
-GEMINI_MODEL = "gemini-1.5-flash"
-GROQ_MODEL = "llama-3.1-70b-versatile"
+# AI Model Settings - UPDATED 2025
+GEMINI_MODEL = "gemini-2.0-flash-exp"  # atau "gemini-1.5-flash-latest"
+GROQ_MODEL = "llama-3.3-70b-versatile"  # Model terbaru Groq 2025
 
 # =============================================================================
 # BOT SETTINGS
@@ -133,8 +133,8 @@ def validate_config():
     if not DISCORD_TOKEN:
         errors.append("DISCORD_TOKEN tidak ditemukan di .env")
     
-    if not GEMINI_API_KEY:
-        errors.append("GEMINI_API_KEY tidak ditemukan di .env")
+    if not GEMINI_API_KEY and not GROQ_API_KEY:
+        errors.append("Minimal satu API key (GEMINI atau GROQ) harus diset")
     
     if errors:
         for error in errors:
