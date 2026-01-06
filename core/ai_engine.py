@@ -1,7 +1,8 @@
 """
 AI Engine - Integrasi Google Gemini & Groq (GRATIS)
-Primary: Gemini 1.5 Flash
-Backup: Groq Llama 3.1 70B
+Primary: Gemini 2.0 Flash
+Backup: Groq Llama 3.3 70B
+Updated: January 2025
 """
 
 import asyncio
@@ -76,29 +77,14 @@ Contoh: Rp 1.500.000,00""",
 
 ATURAN OUTPUT:
 1. Berikan respons dalam format JSON yang valid
-2. Struktur: {"sheets": [{"name": "Sheet1", "data": [[...]], "formulas": {...}, "formatting": {...}}]}
+2. Struktur: {"sheets": [{"name": "Sheet1", "headers": [...], "data": [[...]], "formulas": {...}, "formatting": {...}}]}
 3. Gunakan format angka Indonesia (Rp 1.500.000)
 4. Sertakan rumus Excel yang sesuai
 
-Contoh format data:
-{
-    "sheets": [{
-        "name": "Laporan",
-        "headers": ["No", "Deskripsi", "Jumlah", "Harga", "Total"],
-        "data": [
-            [1, "Item A", 10, 50000, "=C2*D2"],
-            [2, "Item B", 5, 75000, "=C3*D3"]
-        ],
-        "formulas": {
-            "E10": "=SUM(E2:E9)"
-        },
-        "column_widths": {"A": 5, "B": 30, "C": 10, "D": 15, "E": 15},
-        "formatting": {
-            "currency_columns": ["D", "E"],
-            "header_style": "bold_center"
-        }
-    }]
-}""",
+PENTING: Output HARUS berupa JSON valid, tanpa markdown code block.
+
+Contoh format yang benar:
+{"sheets": [{"name": "Laporan", "headers": ["No", "Deskripsi", "Jumlah", "Harga", "Total"], "data": [[1, "Item A", 10, 50000, "=C2*D2"]], "formulas": {"E10": "=SUM(E2:E9)"}, "column_widths": {"A": 5, "B": 30, "C": 10, "D": 15, "E": 15}, "formatting": {"currency_columns": ["D", "E"]}}]}""",
 
     TaskType.EXCEL_FIX: """Kamu adalah ahli debugging Excel. Tugasmu memperbaiki file Excel.
 
@@ -107,22 +93,8 @@ ANALISIS:
 2. Jelaskan penyebab error
 3. Berikan solusi perbaikan
 
-FORMAT OUTPUT:
-{
-    "errors_found": [
-        {
-            "cell": "D5",
-            "current_formula": "=VLOOKUP(A5,B:C,3,FALSE)",
-            "error_type": "#REF!",
-            "cause": "Kolom index 3 tidak ada dalam range B:C",
-            "fix": "=VLOOKUP(A5,B:D,3,FALSE)"
-        }
-    ],
-    "fixed_formulas": {
-        "D5": "=VLOOKUP(A5,B:D,3,FALSE)"
-    },
-    "recommendations": ["Gunakan IFERROR untuk handle error"]
-}""",
+FORMAT OUTPUT (JSON):
+{"errors_found": [{"cell": "D5", "error_type": "#REF!", "cause": "...", "fix": "..."}], "fixed_formulas": {"D5": "=VLOOKUP(A5,B:D,3,FALSE)"}, "recommendations": ["..."]}""",
 
     TaskType.EXCEL_FORMULA: """Kamu adalah master rumus Excel dengan pengetahuan 400+ formula.
 
@@ -132,157 +104,95 @@ TUGASMU:
 3. Berikan contoh penggunaan
 4. Berikan tips dan variasi
 
-KATEGORI RUMUS YANG KAMU KUASAI:
-- Lookup: VLOOKUP, HLOOKUP, XLOOKUP, INDEX, MATCH, INDIRECT, OFFSET
-- Math: SUM, SUMIF, SUMIFS, SUMPRODUCT, ROUND, CEILING, FLOOR
-- Statistical: AVERAGE, AVERAGEIF, COUNT, COUNTIF, MAX, MIN, MEDIAN
-- Text: CONCATENATE, TEXTJOIN, LEFT, RIGHT, MID, TRIM, SUBSTITUTE
-- Date: DATE, YEAR, MONTH, DAY, NETWORKDAYS, WORKDAY, DATEDIF
-- Logical: IF, IFS, SWITCH, AND, OR, NOT, IFERROR, IFNA
-- Financial: PMT, FV, PV, NPV, IRR, XIRR, XNPV
-- Array: FILTER, SORT, UNIQUE, SEQUENCE, RANDARRAY
-- Database: DSUM, DAVERAGE, DCOUNT, DGET
+KATEGORI RUMUS:
+- Lookup: VLOOKUP, HLOOKUP, XLOOKUP, INDEX, MATCH
+- Math: SUM, SUMIF, SUMIFS, SUMPRODUCT, ROUND
+- Statistical: AVERAGE, COUNT, COUNTIF, MAX, MIN
+- Text: CONCATENATE, TEXTJOIN, LEFT, RIGHT, MID
+- Date: DATE, YEAR, MONTH, DAY, NETWORKDAYS
+- Logical: IF, IFS, AND, OR, IFERROR
+- Financial: PMT, FV, PV, NPV, IRR
 
-Selalu berikan contoh dengan konteks Indonesia (Rupiah, tanggal DD/MM/YYYY).""",
+Berikan contoh dengan konteks Indonesia (Rupiah, tanggal DD/MM/YYYY).""",
 
-    TaskType.EXCEL_ANALYZE: """Kamu adalah data analyst profesional. Tugasmu menganalisis data Excel.
+    TaskType.EXCEL_ANALYZE: """Kamu adalah data analyst profesional.
 
-ANALISIS YANG DILAKUKAN:
-1. Summary statistics (mean, median, mode, std dev)
+ANALISIS:
+1. Summary statistics
 2. Trend analysis
-3. Outlier detection
-4. Correlation (jika ada multiple variables)
-5. Insights & recommendations
+3. Key insights
+4. Recommendations
 
-FORMAT OUTPUT:
-{
-    "summary": {
-        "total_rows": 100,
-        "total_columns": 5,
-        "numeric_columns": ["Penjualan", "Qty"],
-        "date_range": "01/01/2024 - 31/12/2024"
-    },
-    "statistics": {
-        "Penjualan": {"mean": 5000000, "median": 4500000, "min": 100000, "max": 50000000}
-    },
-    "insights": [
-        "Penjualan tertinggi terjadi di Q4",
-        "Produk A menyumbang 45% total revenue"
-    ],
-    "recommendations": [
-        "Fokus marketing di Q4",
-        "Tingkatkan stok Produk A"
-    ],
-    "charts_suggested": ["line_chart_monthly_sales", "pie_chart_product_distribution"]
-}""",
+FORMAT OUTPUT (JSON):
+{"summary": {...}, "statistics": {...}, "insights": [...], "recommendations": [...]}""",
 
-    TaskType.FINANCE: """Kamu adalah akuntan dan analis keuangan profesional Indonesia.
+    TaskType.FINANCE: """Kamu adalah akuntan profesional Indonesia.
 
-KEAHLIANMU:
-1. Laporan Keuangan (Neraca, Laba Rugi, Cash Flow, Perubahan Ekuitas)
-2. Rasio Keuangan (Likuiditas, Solvabilitas, Profitabilitas, Aktivitas)
+KEAHLIAN:
+1. Laporan Keuangan (Neraca, Laba Rugi, Cash Flow)
+2. Rasio Keuangan
 3. Budgeting & Forecasting
-4. Analisis Break Even Point
-5. Depreciation (Straight Line, Declining Balance, Sum of Years)
-6. Working Capital Management
+4. Break Even Point
+5. Depreciation
 
-STANDAR:
-- Gunakan PSAK (Pernyataan Standar Akuntansi Keuangan) Indonesia
-- Format Rupiah: Rp 1.500.000
-- Pisahkan Debit dan Kredit dengan jelas""",
+Gunakan standar PSAK Indonesia. Format Rupiah: Rp 1.500.000""",
 
-    TaskType.TAX: """Kamu adalah konsultan pajak Indonesia yang ahli dalam:
+    TaskType.TAX: """Kamu adalah konsultan pajak Indonesia.
 
-PERPAJAKAN INDONESIA:
-1. PPh Pasal 21 (Karyawan)
-   - PTKP 2024: TK/0 = Rp 54.000.000, K/0 = Rp 58.500.000, dll
-   - Tarif progresif: 5% (s.d 60jt), 15% (60-250jt), 25% (250-500jt), 30% (500jt-5M), 35% (>5M)
-   
-2. PPh Pasal 22 (Impor, Bendaharawan)
-3. PPh Pasal 23 (Jasa, Royalti, Bunga, Dividen)
-4. PPh Pasal 25/29 (Angsuran/Tahunan Badan)
-5. PPh Final (UMKM 0.5%, Sewa, Konstruksi)
-6. PPN 11%
-7. PPnBM
+PERPAJAKAN:
+1. PPh 21 - PTKP 2024: TK/0=54jt, K/0=58.5jt, dst
+2. Tarif progresif: 5%(s.d 60jt), 15%(60-250jt), 25%(250-500jt), 30%(500jt-5M), 35%(>5M)
+3. PPh 23, PPh 25/29, PPh Final
+4. PPN 11%
 
-SELALU:
-- Sebutkan dasar hukum (UU, PP, PMK, PER)
-- Hitung dengan akurat
-- Berikan contoh perhitungan step-by-step""",
+Hitung akurat dan berikan dasar hukum.""",
 
-    TaskType.INVOICE: """Kamu adalah ahli pembuatan dokumen bisnis Indonesia.
+    TaskType.INVOICE: """Kamu adalah ahli dokumen bisnis Indonesia.
 
-DOKUMEN YANG BISA DIBUAT:
+DOKUMEN:
 1. Invoice / Faktur
-2. Kwitansi
-3. Purchase Order (PO)
-4. Quotation / Penawaran Harga
-5. Delivery Order (DO)
-6. Faktur Pajak
+2. Quotation
+3. Purchase Order
+4. Kwitansi
 
-FORMAT INVOICE INDONESIA:
-- Nomor Invoice: INV/2024/01/001
+FORMAT INVOICE:
+- Nomor: INV/2024/01/001
 - Tanggal: DD/MM/YYYY
-- Jatuh Tempo: DD/MM/YYYY
-- Mata Uang: Rupiah (Rp)
-- PPN 11% jika kena pajak
+- PPN 11%
 - Terbilang dalam Bahasa Indonesia
 
-Berikan output dalam format JSON yang bisa dikonversi ke Excel.""",
+Output dalam format JSON untuk dikonversi ke Excel.""",
 
-    TaskType.DATA_ANALYSIS: """Kamu adalah data analyst dan business intelligence specialist.
+    TaskType.DATA_ANALYSIS: """Kamu adalah data analyst.
 
-KEMAMPUANMU:
-1. Descriptive Analytics (What happened?)
-2. Diagnostic Analytics (Why did it happen?)
-3. Predictive Analytics (What will happen?)
-4. Prescriptive Analytics (What should we do?)
+ANALISIS:
+1. Descriptive Analytics
+2. Diagnostic Analytics
+3. Insights actionable
 
-TOOLS ANALYSIS:
-- Pivot Table recommendations
-- Statistical tests
-- Trend analysis
-- Forecasting
-- Segmentation
-- Cohort analysis
-
-Berikan insight yang actionable untuk bisnis Indonesia.""",
+Berikan insight bisnis yang relevan untuk Indonesia.""",
 
     TaskType.COPYWRITING: """Kamu adalah copywriter profesional Indonesia.
 
-JENIS DOKUMEN:
+DOKUMEN:
 1. Email bisnis formal
 2. Proposal
-3. Company Profile
-4. Meeting Minutes (Notulensi)
-5. Memo internal
-6. Surat resmi
-7. Press release
-8. Job description
+3. Memo internal
+4. Surat resmi
+5. Notulensi
 
-GAYA BAHASA:
-- Formal dan profesional
-- Bahasa Indonesia baku (EYD)
-- Struktur yang jelas
-- Call-to-action yang tepat""",
+Gunakan Bahasa Indonesia baku dan profesional.""",
 
-    TaskType.HR: """Kamu adalah HR Manager profesional Indonesia.
+    TaskType.HR: """Kamu adalah HR Manager Indonesia.
 
-KEAHLIANMU:
+KEAHLIAN:
 1. Payroll & Slip Gaji
-   - Gaji pokok, tunjangan, lembur
-   - Potongan: PPh 21, BPJS Kesehatan (1%), BPJS TK (2%)
-   - BPJS Perusahaan: Kesehatan (4%), JKK (0.24-1.74%), JKM (0.3%), JHT (3.7%), JP (2%)
-   
-2. Absensi & Cuti
-   - Cuti tahunan: 12 hari (setelah 1 tahun)
-   - Cuti besar, cuti bersama, cuti melahirkan
-   
-3. Kontrak Kerja (PKWT, PKWTT)
-4. Performance Review
-5. Rekrutmen
+2. BPJS: Kesehatan 1%, TK 2%
+3. PPh 21
+4. Lembur: jam 1 = 1.5x, jam 2+ = 2x
+5. Cuti tahunan: 12 hari
 
-Selalu sesuai UU Ketenagakerjaan Indonesia (UU 13/2003, UU Cipta Kerja)."""
+Sesuai UU Ketenagakerjaan Indonesia."""
 }
 
 # =============================================================================
@@ -319,47 +229,78 @@ class AIEngine:
     
     def _setup_gemini(self):
         """Setup Google Gemini"""
+        self.gemini_available = False
+        self.gemini_model = None
+        
+        if not GEMINI_API_KEY:
+            logger.warning("GEMINI_API_KEY not set, Gemini will be disabled")
+            return
+        
         try:
-            if not GEMINI_API_KEY:
-                logger.warning("GEMINI_API_KEY not set, Gemini will be disabled")
-                self.gemini_available = False
-                self.gemini_model = None
-                return
-                
             genai.configure(api_key=GEMINI_API_KEY)
-            self.gemini_model = genai.GenerativeModel(
-                model_name=GEMINI_MODEL,
-                generation_config={
-                    "temperature": 0.7,
-                    "top_p": 0.95,
-                    "top_k": 40,
-                    "max_output_tokens": 8192,
-                }
-            )
-            self.gemini_available = True
-            logger.info(f"Gemini initialized: {GEMINI_MODEL}")
+            
+            # Try multiple model names (fallback)
+            model_names = [
+                "gemini-2.0-flash-exp",
+                "gemini-1.5-flash-latest", 
+                "gemini-1.5-flash",
+                "gemini-1.5-pro-latest",
+                "gemini-pro"
+            ]
+            
+            for model_name in model_names:
+                try:
+                    self.gemini_model = genai.GenerativeModel(
+                        model_name=model_name,
+                        generation_config={
+                            "temperature": 0.7,
+                            "top_p": 0.95,
+                            "top_k": 40,
+                            "max_output_tokens": 8192,
+                        }
+                    )
+                    # Test model
+                    self.gemini_available = True
+                    logger.info(f"Gemini initialized: {model_name}")
+                    break
+                except Exception as e:
+                    logger.warning(f"Model {model_name} not available: {e}")
+                    continue
+            
+            if not self.gemini_available:
+                logger.error("No Gemini model available")
+                
         except Exception as e:
             logger.error(f"Failed to initialize Gemini: {e}")
-            self.gemini_available = False
-            self.gemini_model = None
     
     def _setup_groq(self):
         """Setup Groq"""
+        self.groq_available = False
+        self.groq_client = None
+        self.groq_model = GROQ_MODEL
+        
+        if not GROQ_API_KEY:
+            logger.warning("GROQ_API_KEY not set, Groq will be disabled")
+            return
+        
         try:
-            if not GROQ_API_KEY:
-                logger.warning("GROQ_API_KEY not set, Groq will be disabled")
-                self.groq_available = False
-                self.groq_client = None
-                return
-            
-            # Initialize Groq client without extra parameters
             self.groq_client = AsyncGroq(api_key=GROQ_API_KEY)
+            
+            # Available Groq models (2025)
+            self.groq_models = [
+                "llama-3.3-70b-versatile",
+                "llama-3.1-8b-instant",
+                "llama3-groq-70b-8192-tool-use-preview",
+                "mixtral-8x7b-32768",
+                "gemma2-9b-it"
+            ]
+            
+            self.groq_model = self.groq_models[0]  # Primary
             self.groq_available = True
-            logger.info(f"Groq initialized: {GROQ_MODEL}")
+            logger.info(f"Groq initialized: {self.groq_model}")
+            
         except Exception as e:
             logger.error(f"Failed to initialize Groq: {e}")
-            self.groq_available = False
-            self.groq_client = None
     
     # =========================================================================
     # RATE LIMITING
@@ -368,7 +309,6 @@ class AIEngine:
     async def _check_rate_limit(self) -> bool:
         """Check if we're within rate limits"""
         now = time.time()
-        # Remove timestamps older than 1 minute
         self._request_timestamps = [
             ts for ts in self._request_timestamps 
             if now - ts < 60
@@ -410,7 +350,6 @@ class AIEngine:
             try:
                 await self._wait_for_rate_limit()
                 
-                # Run in executor karena library sync
                 loop = asyncio.get_event_loop()
                 response = await loop.run_in_executor(
                     None,
@@ -419,11 +358,18 @@ class AIEngine:
                 
                 self.stats["gemini_requests"] += 1
                 
+                # Extract text from response
+                response_text = ""
+                if hasattr(response, 'text'):
+                    response_text = response.text
+                elif hasattr(response, 'parts'):
+                    response_text = "".join([part.text for part in response.parts if hasattr(part, 'text')])
+                
                 return AIResponse(
                     success=True,
-                    content=response.text,
+                    content=response_text,
                     provider=AIProvider.GEMINI,
-                    tokens_used=0  # Gemini doesn't expose this easily
+                    tokens_used=0
                 )
                 
             except Exception as e:
@@ -431,14 +377,7 @@ class AIEngine:
                 self.stats["gemini_errors"] += 1
                 
                 if attempt < max_retries - 1:
-                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
-                else:
-                    return AIResponse(
-                        success=False,
-                        content="",
-                        provider=AIProvider.GEMINI,
-                        error=str(e)
-                    )
+                    await asyncio.sleep(2 ** attempt)
         
         return AIResponse(
             success=False,
@@ -457,7 +396,7 @@ class AIEngine:
         system_prompt: str,
         max_retries: int = 3
     ) -> AIResponse:
-        """Query Groq API"""
+        """Query Groq API with model fallback"""
         if not self.groq_available or self.groq_client is None:
             return AIResponse(
                 success=False,
@@ -467,47 +406,49 @@ class AIEngine:
             )
         
         for attempt in range(max_retries):
-            try:
-                await self._wait_for_rate_limit()
-                
-                response = await self.groq_client.chat.completions.create(
-                    model=GROQ_MODEL,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.7,
-                    max_tokens=8192,
-                )
-                
-                self.stats["groq_requests"] += 1
-                
-                return AIResponse(
-                    success=True,
-                    content=response.choices[0].message.content,
-                    provider=AIProvider.GROQ,
-                    tokens_used=response.usage.total_tokens if response.usage else 0
-                )
-                
-            except Exception as e:
-                logger.warning(f"Groq attempt {attempt + 1} failed: {e}")
-                self.stats["groq_errors"] += 1
-                
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(2 ** attempt)
-                else:
-                    return AIResponse(
-                        success=False,
-                        content="",
-                        provider=AIProvider.GROQ,
-                        error=str(e)
+            for model in self.groq_models:
+                try:
+                    await self._wait_for_rate_limit()
+                    
+                    response = await self.groq_client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.7,
+                        max_tokens=8192,
                     )
+                    
+                    self.stats["groq_requests"] += 1
+                    
+                    return AIResponse(
+                        success=True,
+                        content=response.choices[0].message.content,
+                        provider=AIProvider.GROQ,
+                        tokens_used=response.usage.total_tokens if response.usage else 0
+                    )
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    
+                    # If model deprecated, try next model
+                    if "decommissioned" in error_msg.lower() or "not found" in error_msg.lower():
+                        logger.warning(f"Groq model {model} not available, trying next...")
+                        continue
+                    
+                    logger.warning(f"Groq attempt with {model} failed: {e}")
+                    self.stats["groq_errors"] += 1
+                    break
+            
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2 ** attempt)
         
         return AIResponse(
             success=False,
             content="",
             provider=AIProvider.GROQ,
-            error="Max retries exceeded"
+            error="All Groq models failed"
         )
     
     # =========================================================================
@@ -571,7 +512,7 @@ class AIEngine:
 
 {description}
 
-Berikan output dalam format JSON yang valid sesuai template."""
+PENTING: Output HARUS berupa JSON valid saja, tanpa markdown, tanpa code block, tanpa penjelasan."""
         
         return await self.query(prompt, TaskType.EXCEL_CREATE)
     
@@ -581,7 +522,7 @@ Berikan output dalam format JSON yang valid sesuai template."""
 
 {errors_description}
 
-Berikan solusi perbaikan dalam format JSON."""
+Berikan solusi perbaikan."""
         
         return await self.query(prompt, TaskType.EXCEL_FIX)
     
@@ -593,9 +534,9 @@ Berikan solusi perbaikan dalam format JSON."""
 
 Sertakan:
 1. Syntax lengkap
-2. Penjelasan setiap parameter
-3. Contoh penggunaan dalam konteks Indonesia
-4. Tips dan variasi penggunaan"""
+2. Penjelasan parameter
+3. Contoh penggunaan Indonesia
+4. Tips penggunaan"""
         
         return await self.query(prompt, TaskType.EXCEL_FORMULA)
     
@@ -605,11 +546,7 @@ Sertakan:
 
 {data_description}
 
-Berikan:
-1. Summary statistics
-2. Trend analysis
-3. Key insights
-4. Recommendations"""
+Berikan summary, insights, dan recommendations."""
         
         return await self.query(prompt, TaskType.DATA_ANALYSIS)
     
@@ -619,7 +556,13 @@ Berikan:
     
     async def generate_invoice(self, invoice_details: str) -> AIResponse:
         """Generate invoice structure"""
-        return await self.query(invoice_details, TaskType.INVOICE)
+        prompt = f"""Buatkan struktur invoice untuk:
+
+{invoice_details}
+
+Output dalam format JSON valid untuk dikonversi ke Excel."""
+        
+        return await self.query(prompt, TaskType.INVOICE)
     
     async def generate_document(self, doc_request: str) -> AIResponse:
         """Generate business document"""
