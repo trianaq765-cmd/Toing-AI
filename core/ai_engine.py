@@ -312,11 +312,20 @@ class AIEngine:
             "fallbacks": 0
         }
         
+        # Expose TaskType for external use
+        self.TaskType = TaskType
+        
         logger.info("AI Engine initialized with Gemini + Groq")
     
     def _setup_gemini(self):
         """Setup Google Gemini"""
         try:
+            if not GEMINI_API_KEY:
+                logger.warning("GEMINI_API_KEY not set, Gemini will be disabled")
+                self.gemini_available = False
+                self.gemini_model = None
+                return
+                
             genai.configure(api_key=GEMINI_API_KEY)
             self.gemini_model = genai.GenerativeModel(
                 model_name=GEMINI_MODEL,
@@ -332,16 +341,25 @@ class AIEngine:
         except Exception as e:
             logger.error(f"Failed to initialize Gemini: {e}")
             self.gemini_available = False
+            self.gemini_model = None
     
     def _setup_groq(self):
         """Setup Groq"""
         try:
+            if not GROQ_API_KEY:
+                logger.warning("GROQ_API_KEY not set, Groq will be disabled")
+                self.groq_available = False
+                self.groq_client = None
+                return
+            
+            # Initialize Groq client without extra parameters
             self.groq_client = AsyncGroq(api_key=GROQ_API_KEY)
             self.groq_available = True
             logger.info(f"Groq initialized: {GROQ_MODEL}")
         except Exception as e:
             logger.error(f"Failed to initialize Groq: {e}")
             self.groq_available = False
+            self.groq_client = None
     
     # =========================================================================
     # RATE LIMITING
@@ -378,7 +396,7 @@ class AIEngine:
         max_retries: int = 3
     ) -> AIResponse:
         """Query Gemini API"""
-        if not self.gemini_available:
+        if not self.gemini_available or self.gemini_model is None:
             return AIResponse(
                 success=False,
                 content="",
@@ -421,6 +439,13 @@ class AIEngine:
                         provider=AIProvider.GEMINI,
                         error=str(e)
                     )
+        
+        return AIResponse(
+            success=False,
+            content="",
+            provider=AIProvider.GEMINI,
+            error="Max retries exceeded"
+        )
     
     # =========================================================================
     # GROQ
@@ -433,7 +458,7 @@ class AIEngine:
         max_retries: int = 3
     ) -> AIResponse:
         """Query Groq API"""
-        if not self.groq_available:
+        if not self.groq_available or self.groq_client is None:
             return AIResponse(
                 success=False,
                 content="",
@@ -477,6 +502,13 @@ class AIEngine:
                         provider=AIProvider.GROQ,
                         error=str(e)
                     )
+        
+        return AIResponse(
+            success=False,
+            content="",
+            provider=AIProvider.GROQ,
+            error="Max retries exceeded"
+        )
     
     # =========================================================================
     # MAIN QUERY METHOD
@@ -499,7 +531,7 @@ class AIEngine:
         )
         
         # Determine primary provider
-        if prefer_provider == AIProvider.GROQ:
+        if prefer_provider == AIProvider.GROQ and self.groq_available:
             primary_query = self._query_groq
             fallback_query = self._query_gemini
         else:
@@ -526,7 +558,7 @@ class AIEngine:
             success=False,
             content="",
             provider=AIProvider.GEMINI,
-            error=f"All providers failed. Gemini: {response.error}, Groq: {fallback_response.error}"
+            error=f"All providers failed. Primary: {response.error}, Fallback: {fallback_response.error}"
         )
     
     # =========================================================================
@@ -623,3 +655,7 @@ Berikan:
             "groq_errors": 0,
             "fallbacks": 0
         }
+    
+    def is_available(self) -> bool:
+        """Check if at least one AI provider is available"""
+        return self.gemini_available or self.groq_available
