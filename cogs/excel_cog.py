@@ -4,6 +4,7 @@ Buat, edit, perbaiki, analisis file Excel
 """
 
 import logging
+import re
 from typing import Optional
 import json
 
@@ -16,6 +17,81 @@ from utils.validators import Validators
 from utils.helpers import Helpers
 
 logger = logging.getLogger("office_bot.excel")
+
+# =============================================================================
+# HELPER FUNCTION - EXTRACT JSON
+# =============================================================================
+
+def extract_json_from_response(response_text: str) -> dict:
+    """
+    Extract JSON from AI response, handling markdown code blocks and extra text
+    """
+    if not response_text:
+        raise ValueError("Empty response from AI")
+    
+    text = response_text.strip()
+    
+    # Method 1: Try direct JSON parse
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    
+    # Method 2: Extract from ```json ... ``` code block
+    json_match = re.search(r'```json\s*([\s\S]*?)\s*```', text)
+    if json_match:
+        try:
+            return json.loads(json_match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+    
+    # Method 3: Extract from ``` ... ``` code block (without json tag)
+    code_match = re.search(r'```\s*([\s\S]*?)\s*```', text)
+    if code_match:
+        try:
+            return json.loads(code_match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+    
+    # Method 4: Find JSON object pattern { ... }
+    json_obj_match = re.search(r'\{[\s\S]*\}', text)
+    if json_obj_match:
+        try:
+            return json.loads(json_obj_match.group(0))
+        except json.JSONDecodeError:
+            pass
+    
+    # Method 5: Find JSON array pattern [ ... ]
+    json_arr_match = re.search(r'\[[\s\S]*\]', text)
+    if json_arr_match:
+        try:
+            return json.loads(json_arr_match.group(0))
+        except json.JSONDecodeError:
+            pass
+    
+    # If all methods fail, raise error with helpful message
+    raise ValueError(f"Could not extract valid JSON from response. First 200 chars: {text[:200]}")
+
+
+def create_default_structure(description: str) -> dict:
+    """
+    Create a default Excel structure when AI fails
+    """
+    return {
+        "sheets": [{
+            "name": "Sheet1",
+            "headers": ["No", "Data 1", "Data 2", "Data 3", "Keterangan"],
+            "data": [
+                [1, "", "", "", ""],
+                [2, "", "", "", ""],
+                [3, "", "", "", ""],
+                [4, "", "", "", ""],
+                [5, "", "", "", ""],
+            ],
+            "column_widths": {"A": 5, "B": 20, "C": 20, "D": 20, "E": 30},
+            "formatting": {}
+        }]
+    }
 
 # =============================================================================
 # EXCEL COG
@@ -42,26 +118,30 @@ class ExcelCog(commands.Cog):
         
         Usage: !buat tabel penjualan dengan kolom: tanggal, produk, qty, harga, total
         """
-        loading = await ctx.send(embed=Helpers.create_loading_embed("Membuat Excel..."))
+        loading = await ctx.send(embed=Helpers.create_loading_embed("Membuat Excel... (AI sedang memproses)"))
         
         try:
             # Get AI to create structure
             ai_response = await self.bot.ai_engine.create_excel_structure(description)
             
             if not ai_response.success:
-                raise Exception(ai_response.error)
+                raise Exception(f"AI Error: {ai_response.error}")
             
-            # Parse JSON response
+            # Log raw response for debugging
+            logger.info(f"AI Response (first 500 chars): {ai_response.content[:500]}")
+            
+            # Parse JSON response with robust extraction
             try:
-                structure = json.loads(ai_response.content)
-            except json.JSONDecodeError:
-                # Try to extract JSON from markdown code blocks
-                content = ai_response.content
-                if "```json" in content:
-                    content = content.split("```json")[1].split("```")[0]
-                elif "```" in content:
-                    content = content.split("```")[1].split("```")[0]
-                structure = json.loads(content.strip())
+                structure = extract_json_from_response(ai_response.content)
+            except ValueError as e:
+                logger.warning(f"JSON extraction failed: {e}")
+                # Use default structure
+                structure = create_default_structure(description)
+                await ctx.send(f"⚠️ AI response tidak sempurna, menggunakan template default. Silakan edit sesuai kebutuhan.")
+            
+            # Validate structure
+            if "sheets" not in structure:
+                structure = {"sheets": [structure]} if isinstance(structure, dict) else create_default_structure(description)
             
             # Create Excel file
             file_path = await self.bot.excel_engine.create_excel(structure)
@@ -82,10 +162,11 @@ class ExcelCog(commands.Cog):
                 first_sheet = structure['sheets'][0]
                 preview = f"**Sheet: {first_sheet.get('name', 'Sheet1')}**\n"
                 
-                if first_sheet.get('headers'):
-                    preview += f"Columns: {', '.join(first_sheet['headers'][:5])}"
-                    if len(first_sheet['headers']) > 5:
-                        preview += f" ... (+{len(first_sheet['headers'])-5} more)"
+                headers = first_sheet.get('headers', [])
+                if headers:
+                    preview += f"Columns: {', '.join(str(h) for h in headers[:5])}"
+                    if len(headers) > 5:
+                        preview += f" ... (+{len(headers)-5} more)"
                 
                 embed.add_field(
                     name=f"{EMOJIS['excel']} Preview",
@@ -110,9 +191,8 @@ class ExcelCog(commands.Cog):
             embed = Helpers.create_error_embed(
                 title="Error Membuat Excel",
                 description=f"```{str(e)[:500]}```\n\n"
-                           f"**Tips:** Berikan deskripsi yang jelas, contoh:\n"
-                           f"• Tabel data karyawan dengan NIK, nama, jabatan, gaji\n"
-                           f"• Laporan penjualan Q1 2024 dengan rumus total"
+                           f"**Tips:** Coba perintah yang lebih sederhana, contoh:\n"
+                           f"`!buat tabel karyawan dengan kolom NIK, Nama, Gaji`"
             )
             await ctx.send(embed=embed)
     
@@ -184,7 +264,7 @@ class ExcelCog(commands.Cog):
             
             # Show errors found
             errors_text = f"Ditemukan **{len(errors)} error**:\n\n"
-            for i, error in enumerate(errors[:10], 1):  # Show first 10
+            for i, error in enumerate(errors[:10], 1):
                 errors_text += f"{i}. **{error.cell}**: {error.error_type}\n"
                 errors_text += f"   _{error.message}_\n\n"
             
@@ -194,7 +274,7 @@ class ExcelCog(commands.Cog):
             # Get AI suggestions
             errors_description = "\n".join([
                 f"Cell {e.cell}: {e.error_type} - Formula: {e.formula}"
-                for e in errors[:5]  # Send first 5 to AI
+                for e in errors[:5]
             ])
             
             ai_response = await self.bot.ai_engine.fix_excel_errors(errors_description)
@@ -222,7 +302,7 @@ class ExcelCog(commands.Cog):
             
             embed.add_field(
                 name="ℹ️ Catatan",
-                value="File telah diperbaiki secara otomatis untuk error yang umum.\n"
+                value="File telah diperbaiki secara otomatis untuk error umum.\n"
                       "Silakan cek hasil dan sesuaikan jika perlu.",
                 inline=False
             )
@@ -302,7 +382,7 @@ class ExcelCog(commands.Cog):
                 if formula_info.get('examples'):
                     examples_text = "\n\n".join([
                         f"**{ex['title']}**\n```excel\n{ex['formula']}\n```\n_{ex['explanation']}_"
-                        for ex in formula_info['examples'][:2]  # Show 2 examples
+                        for ex in formula_info['examples'][:2]
                     ])
                     embed.add_field(
                         name="💡 Contoh Penggunaan",
@@ -381,7 +461,7 @@ class ExcelCog(commands.Cog):
                 
                 formulas_text = "\n".join([
                     f"• **{f['name']}** - {f['description'][:50]}..."
-                    for f in formulas[:20]  # Max 20
+                    for f in formulas[:20]
                 ])
                 
                 embed.description = formulas_text
