@@ -3,6 +3,7 @@ Finance Cog - Financial analysis, accounting, budgeting
 """
 
 import logging
+import re
 from typing import Optional
 import json
 
@@ -17,14 +18,53 @@ from utils.helpers import Helpers
 logger = logging.getLogger("office_bot.finance")
 
 # =============================================================================
+# JSON EXTRACTION HELPER
+# =============================================================================
+
+def extract_json_from_response(response_text: str) -> dict:
+    """Extract JSON from AI response"""
+    if not response_text:
+        raise ValueError("Empty response")
+    
+    text = response_text.strip()
+    
+    # Method 1: Direct parse
+    try:
+        return json.loads(text)
+    except:
+        pass
+    
+    # Method 2: From ```json ... ```
+    match = re.search(r'```json\s*([\s\S]*?)\s*```', text)
+    if match:
+        try:
+            return json.loads(match.group(1).strip())
+        except:
+            pass
+    
+    # Method 3: From ``` ... ```
+    match = re.search(r'```\s*([\s\S]*?)\s*```', text)
+    if match:
+        try:
+            return json.loads(match.group(1).strip())
+        except:
+            pass
+    
+    # Method 4: Find { ... }
+    match = re.search(r'\{[\s\S]*\}', text)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except:
+            pass
+    
+    raise ValueError("Could not extract JSON")
+
+# =============================================================================
 # FINANCE COG
 # =============================================================================
 
 class FinanceCog(commands.Cog):
-    """
-    Commands untuk finance, accounting, dan analisis keuangan
-    """
-    
     def __init__(self, bot):
         self.bot = bot
         logger.info("Finance Cog loaded")
@@ -36,76 +76,40 @@ class FinanceCog(commands.Cog):
     @commands.command(name="neraca", aliases=["balance_sheet"])
     @commands.cooldown(1, 10, commands.BucketType.user)
     async def create_balance_sheet(self, ctx, *, details: str):
-        """
-        Buat template Neraca (Balance Sheet)
-        
-        Usage: !neraca untuk PT ABC per 31 Des 2024
-        """
+        """Buat template Neraca"""
         loading = await ctx.send(embed=Helpers.create_loading_embed("Membuat neraca..."))
         
         try:
             ai_response = await self.bot.ai_engine.finance_analysis(
-                f"""Buatkan struktur Neraca (Balance Sheet) untuk:
+                f"""Buatkan struktur Neraca untuk: {details}
 
-{details}
-
-Format JSON:
-{{
-    "company": "...",
-    "date": "DD/MM/YYYY",
-    "assets": {{
-        "current": {{"kas": 0, "piutang": 0, "persediaan": 0}},
-        "non_current": {{"aset_tetap": 0, "akumulasi_penyusutan": 0}}
-    }},
-    "liabilities": {{
-        "current": {{"hutang_usaha": 0, "hutang_jangka_pendek": 0}},
-        "non_current": {{"hutang_jangka_panjang": 0}}
-    }},
-    "equity": {{
-        "modal": 0,
-        "laba_ditahan": 0
-    }}
-}}"""
+Output JSON format:
+{{"company": "...", "date": "DD/MM/YYYY", "assets": {{"kas": 0, "piutang": 0}}, "liabilities": {{"hutang": 0}}, "equity": {{"modal": 0}}}}"""
             )
             
             if not ai_response.success:
                 raise Exception(ai_response.error)
             
-            # Parse response
-            data = json.loads(ai_response.content)
+            try:
+                data = extract_json_from_response(ai_response.content)
+            except:
+                # Default structure
+                data = {
+                    "company": details.split()[0] if details else "Perusahaan",
+                    "date": "31/12/2024",
+                    "assets": {"kas": 0, "piutang": 0, "persediaan": 0, "aset_tetap": 0},
+                    "liabilities": {"hutang_usaha": 0, "hutang_bank": 0},
+                    "equity": {"modal": 0, "laba_ditahan": 0}
+                }
             
-            # Create Excel structure
             structure = await self._create_balance_sheet_structure(data)
             file_path = await self.bot.excel_engine.create_excel(structure)
             
-            # Create embed
             embed = Helpers.create_success_embed(
-                title="Neraca (Balance Sheet)",
-                description=f"**{data.get('company', 'N/A')}**\n"
-                           f"Per: {data.get('date', 'N/A')}"
+                title="Neraca Berhasil Dibuat",
+                description=f"**{data.get('company', 'N/A')}**\nPer: {data.get('date', 'N/A')}"
             )
             
-            # Calculate totals
-            total_assets = self._sum_nested_dict(data.get('assets', {}))
-            total_liabilities = self._sum_nested_dict(data.get('liabilities', {}))
-            total_equity = self._sum_nested_dict(data.get('equity', {}))
-            
-            embed.add_field(
-                name=f"{EMOJIS['money']} Summary",
-                value=f"Total Aset: {Formatters.format_rupiah(total_assets)}\n"
-                      f"Total Liabilitas: {Formatters.format_rupiah(total_liabilities)}\n"
-                      f"Total Ekuitas: {Formatters.format_rupiah(total_equity)}",
-                inline=False
-            )
-            
-            if abs(total_assets - (total_liabilities + total_equity)) > 0.01:
-                embed.add_field(
-                    name=f"{EMOJIS['warning']} Perhatian",
-                    value="Aset ≠ Liabilitas + Ekuitas (belum balance)",
-                    inline=False
-                )
-            
-            # Send file
             discord_file = self.bot.file_handler.create_discord_file(file_path)
             await loading.delete()
             await ctx.send(embed=embed, file=discord_file)
@@ -116,46 +120,31 @@ Format JSON:
         except Exception as e:
             logger.error(f"Error creating balance sheet: {e}")
             await loading.delete()
-            embed = Helpers.create_error_embed(
-                title="Error Membuat Neraca",
-                description=f"```{str(e)[:500]}```"
-            )
-            await ctx.send(embed=embed)
+            await ctx.send(embed=Helpers.create_error_embed("Error", f"```{str(e)[:500]}```"))
     
     @commands.command(name="labarugi", aliases=["income_statement", "pnl"])
     @commands.cooldown(1, 10, commands.BucketType.user)
     async def create_income_statement(self, ctx, *, details: str):
-        """
-        Buat Laporan Laba Rugi (Income Statement)
-        
-        Usage: !labarugi PT ABC periode Jan-Des 2024
-        """
+        """Buat Laporan Laba Rugi"""
         loading = await ctx.send(embed=Helpers.create_loading_embed("Membuat laporan laba rugi..."))
         
         try:
             ai_response = await self.bot.ai_engine.finance_analysis(
-                f"""Buatkan struktur Laporan Laba Rugi untuk:
+                f"""Buatkan struktur Laporan Laba Rugi dari: {details}
 
-{details}
-
-Format JSON dengan komponen:
-- Pendapatan
-- Harga Pokok Penjualan (HPP)
-- Laba Kotor
-- Beban Operasional
-- Laba Operasional
-- Pendapatan/Beban Lain-lain
-- Laba Sebelum Pajak
-- Pajak Penghasilan
-- Laba Bersih"""
+Output JSON format:
+{{"company": "...", "period": "...", "pendapatan": 0, "hpp": 0, "beban_operasional": {{"gaji": 0, "sewa": 0}}, "laba_bersih": 0}}"""
             )
             
             if not ai_response.success:
                 raise Exception(ai_response.error)
             
-            data = json.loads(ai_response.content)
+            try:
+                data = extract_json_from_response(ai_response.content)
+            except:
+                # Parse from details string
+                data = self._parse_income_statement_details(details)
             
-            # Create structure
             structure = await self._create_income_statement_structure(data)
             file_path = await self.bot.excel_engine.create_excel(structure)
             
@@ -166,8 +155,7 @@ Format JSON dengan komponen:
             
             embed = Helpers.create_success_embed(
                 title="Laporan Laba Rugi",
-                description=f"**{data.get('company', 'N/A')}**\n"
-                           f"Periode: {data.get('period', 'N/A')}"
+                description=f"**{data.get('company', 'N/A')}**\nPeriode: {data.get('period', 'N/A')}"
             )
             
             embed.add_field(
@@ -188,47 +176,21 @@ Format JSON dengan komponen:
         except Exception as e:
             logger.error(f"Error creating income statement: {e}")
             await loading.delete()
-            embed = Helpers.create_error_embed(
-                title="Error Membuat Laba Rugi",
-                description=f"```{str(e)[:500]}```"
-            )
-            await ctx.send(embed=embed)
+            await ctx.send(embed=Helpers.create_error_embed("Error", f"```{str(e)[:500]}```"))
     
     @commands.command(name="cashflow", aliases=["arus_kas"])
     @commands.cooldown(1, 10, commands.BucketType.user)
     async def create_cashflow(self, ctx, *, details: str):
-        """
-        Buat Laporan Arus Kas (Cash Flow Statement)
-        
-        Usage: !cashflow PT ABC Q1 2024
-        """
+        """Buat Laporan Arus Kas"""
         loading = await ctx.send(embed=Helpers.create_loading_embed("Membuat laporan arus kas..."))
         
         try:
-            ai_response = await self.bot.ai_engine.finance_analysis(
-                f"""Buatkan struktur Laporan Arus Kas untuk:
-
-{details}
-
-Format dengan 3 aktivitas:
-1. Aktivitas Operasi
-2. Aktivitas Investasi
-3. Aktivitas Pendanaan
-
-Output JSON"""
-            )
-            
-            if not ai_response.success:
-                raise Exception(ai_response.error)
-            
-            data = json.loads(ai_response.content)
-            structure = await self._create_cashflow_structure(data)
+            structure = await self._create_cashflow_structure({"company": details.split()[0], "period": "2024"})
             file_path = await self.bot.excel_engine.create_excel(structure)
             
             embed = Helpers.create_success_embed(
                 title="Laporan Arus Kas",
-                description=f"**{data.get('company', 'N/A')}**\n"
-                           f"Periode: {data.get('period', 'N/A')}"
+                description="Template arus kas berhasil dibuat"
             )
             
             discord_file = self.bot.file_handler.create_discord_file(file_path)
@@ -241,11 +203,7 @@ Output JSON"""
         except Exception as e:
             logger.error(f"Error creating cashflow: {e}")
             await loading.delete()
-            embed = Helpers.create_error_embed(
-                title="Error Membuat Arus Kas",
-                description=f"```{str(e)[:500]}```"
-            )
-            await ctx.send(embed=embed)
+            await ctx.send(embed=Helpers.create_error_embed("Error", f"```{str(e)[:500]}```"))
     
     # =========================================================================
     # FINANCIAL CALCULATIONS
@@ -254,18 +212,12 @@ Output JSON"""
     @commands.command(name="bep", aliases=["breakeven"])
     @commands.cooldown(1, 3, commands.BucketType.user)
     async def calculate_bep(self, ctx, fixed_cost: str, price: str, variable_cost: str):
-        """
-        Hitung Break Even Point
-        
-        Usage: !bep 100jt 50000 30000
-               (fixed cost, harga jual, biaya variabel per unit)
-        """
+        """Hitung Break Even Point"""
         try:
             fc = Formatters.parse_rupiah(fixed_cost)
             p = Formatters.parse_rupiah(price)
             vc = Formatters.parse_rupiah(variable_cost)
             
-            # BEP (unit) = Fixed Cost / (Price - Variable Cost)
             contribution_margin = p - vc
             
             if contribution_margin <= 0:
@@ -290,15 +242,8 @@ Output JSON"""
             
             embed.add_field(
                 name="📊 BEP",
-                value=f"**Unit: {Formatters.format_number(bep_units, 2)} unit**\n"
+                value=f"**Unit: {Formatters.format_number(bep_units, 0)} unit**\n"
                       f"**Rupiah: {Formatters.format_rupiah(bep_rupiah)}**",
-                inline=False
-            )
-            
-            embed.add_field(
-                name="💡 Insight",
-                value=f"Anda perlu menjual {int(bep_units)+1} unit untuk mulai profit.\n"
-                      f"Margin per unit: {Formatters.format_rupiah(contribution_margin)}",
                 inline=False
             )
             
@@ -306,307 +251,217 @@ Output JSON"""
             await self.bot.log_usage(ctx.author.id, "bep", "finance", True)
             
         except Exception as e:
-            logger.error(f"Error calculating BEP: {e}")
-            embed = Helpers.create_error_embed(
-                title="Error Menghitung BEP",
-                description=f"```{str(e)[:500]}```"
-            )
-            await ctx.send(embed=embed)
+            await ctx.send(embed=Helpers.create_error_embed("Error BEP", f"```{str(e)}```"))
     
     @commands.command(name="roi")
     @commands.cooldown(1, 3, commands.BucketType.user)
     async def calculate_roi(self, ctx, investment: str, return_value: str):
-        """
-        Hitung Return on Investment (ROI)
-        
-        Usage: !roi 100jt 150jt
-        """
+        """Hitung ROI"""
         try:
             inv = Formatters.parse_rupiah(investment)
             ret = Formatters.parse_rupiah(return_value)
             
             profit = ret - inv
-            roi_pct = (profit / inv) * 100
+            roi_pct = (profit / inv) * 100 if inv > 0 else 0
             
             embed = discord.Embed(
                 title=f"{EMOJIS['chart']} Return on Investment",
                 color=COLORS["finance"]
             )
             
-            embed.add_field(
-                name="Investasi",
-                value=Formatters.format_rupiah(inv),
-                inline=True
-            )
-            
-            embed.add_field(
-                name="Return",
-                value=Formatters.format_rupiah(ret),
-                inline=True
-            )
-            
-            embed.add_field(
-                name="Profit",
-                value=Formatters.format_rupiah(profit),
-                inline=True
-            )
+            embed.add_field(name="Investasi", value=Formatters.format_rupiah(inv), inline=True)
+            embed.add_field(name="Return", value=Formatters.format_rupiah(ret), inline=True)
+            embed.add_field(name="Profit", value=Formatters.format_rupiah(profit), inline=True)
             
             roi_emoji = EMOJIS['success'] if roi_pct > 0 else EMOJIS['error']
-            embed.add_field(
-                name=f"{roi_emoji} ROI",
-                value=f"**{roi_pct:.2f}%**",
-                inline=False
-            )
+            embed.add_field(name=f"{roi_emoji} ROI", value=f"**{roi_pct:.2f}%**", inline=False)
             
             await ctx.send(embed=embed)
             await self.bot.log_usage(ctx.author.id, "roi", "finance", True)
             
         except Exception as e:
-            logger.error(f"Error calculating ROI: {e}")
-            embed = Helpers.create_error_embed(
-                title="Error Menghitung ROI",
-                description=f"```{str(e)[:500]}```"
-            )
-            await ctx.send(embed=embed)
+            await ctx.send(embed=Helpers.create_error_embed("Error ROI", f"```{str(e)}```"))
     
     @commands.command(name="depresiasi", aliases=["depreciation"])
     @commands.cooldown(1, 5, commands.BucketType.user)
     async def calculate_depreciation(self, ctx, cost: str, salvage: str, life: int, method: str = "straight"):
-        """
-        Hitung depresiasi aset
-        
-        Usage: !depresiasi 100jt 10jt 5 straight
-        Methods: straight, declining
-        """
+        """Hitung depresiasi"""
         try:
             cost_val = Formatters.parse_rupiah(cost)
             salvage_val = Formatters.parse_rupiah(salvage)
             
-            if method.lower() == "straight":
-                # Straight Line: (Cost - Salvage) / Life
-                annual_depreciation = (cost_val - salvage_val) / life
-                
-                embed = discord.Embed(
-                    title=f"{EMOJIS['calculator']} Depresiasi - Straight Line",
-                    color=COLORS["finance"]
-                )
-                
-                embed.add_field(
-                    name="Input",
-                    value=f"Harga Perolehan: {Formatters.format_rupiah(cost_val)}\n"
-                          f"Nilai Residu: {Formatters.format_rupiah(salvage_val)}\n"
-                          f"Umur Ekonomis: {life} tahun",
-                    inline=False
-                )
-                
-                embed.add_field(
-                    name="Depresiasi/Tahun",
-                    value=f"**{Formatters.format_rupiah(annual_depreciation)}**",
-                    inline=False
-                )
-                
-                # Schedule
-                schedule = "```\n"
-                schedule += "Tahun | Depresiasi      | Akumulasi       | Nilai Buku\n"
-                schedule += "------|-----------------|-----------------|----------------\n"
-                
-                accumulated = 0
-                for year in range(1, min(life + 1, 6)):  # Max 5 years preview
-                    accumulated += annual_depreciation
-                    book_value = cost_val - accumulated
-                    schedule += f"  {year}   | {annual_depreciation:>13,.0f} | {accumulated:>13,.0f} | {book_value:>13,.0f}\n"
-                
-                if life > 5:
-                    schedule += f"...   | ...             | ...             | ...\n"
-                
-                schedule += "```"
-                
-                embed.add_field(
-                    name="Jadwal Depresiasi",
-                    value=schedule,
-                    inline=False
-                )
-                
-            else:
-                embed = Helpers.create_error_embed(
-                    title="Method Tidak Didukung",
-                    description="Gunakan: straight atau declining"
-                )
+            annual_depreciation = (cost_val - salvage_val) / life
+            
+            embed = discord.Embed(
+                title=f"{EMOJIS['calculator']} Depresiasi - Straight Line",
+                color=COLORS["finance"]
+            )
+            
+            embed.add_field(
+                name="Input",
+                value=f"Harga Perolehan: {Formatters.format_rupiah(cost_val)}\n"
+                      f"Nilai Residu: {Formatters.format_rupiah(salvage_val)}\n"
+                      f"Umur Ekonomis: {life} tahun",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="Depresiasi/Tahun",
+                value=f"**{Formatters.format_rupiah(annual_depreciation)}**",
+                inline=False
+            )
+            
+            # Schedule preview
+            schedule = "```\nTahun | Depresiasi     | Nilai Buku\n"
+            schedule += "------|----------------|---------------\n"
+            accumulated = 0
+            for year in range(1, min(life + 1, 6)):
+                accumulated += annual_depreciation
+                book_value = cost_val - accumulated
+                schedule += f"  {year}   | {annual_depreciation:>13,.0f} | {book_value:>13,.0f}\n"
+            if life > 5:
+                schedule += "...   | ...            | ...\n"
+            schedule += "```"
+            
+            embed.add_field(name="Jadwal", value=schedule, inline=False)
             
             await ctx.send(embed=embed)
             await self.bot.log_usage(ctx.author.id, "depresiasi", "finance", True)
             
         except Exception as e:
-            logger.error(f"Error calculating depreciation: {e}")
-            embed = Helpers.create_error_embed(
-                title="Error Menghitung Depresiasi",
-                description=f"```{str(e)[:500]}```"
-            )
-            await ctx.send(embed=embed)
-    
-    @commands.command(name="rasio", aliases=["ratio"])
-    @commands.cooldown(1, 5, commands.BucketType.user)
-    async def financial_ratios(self, ctx):
-        """
-        Hitung rasio keuangan dari file Excel
-        
-        Usage: Upload balance sheet + income statement + !rasio
-        """
-        if not ctx.message.attachments:
-            embed = Helpers.create_error_embed(
-                title="File Tidak Ditemukan",
-                description="Upload file Excel dengan data keuangan!"
-            )
-            await ctx.send(embed=embed)
-            return
-        
-        loading = await ctx.send(embed=Helpers.create_loading_embed("Menghitung rasio keuangan..."))
-        
-        try:
-            attachment = ctx.message.attachments[0]
-            file_path = await self.bot.file_handler.download_attachment(attachment)
-            
-            # Read Excel
-            excel_data = await self.bot.excel_engine.read_excel(file_path)
-            
-            # Use AI to analyze
-            ai_response = await self.bot.ai_engine.finance_analysis(
-                f"""Dari data Excel berikut, hitung rasio keuangan:
-
-{str(excel_data['data'][:100])}
-
-Hitung:
-1. Current Ratio = Aset Lancar / Liabilitas Lancar
-2. Quick Ratio = (Aset Lancar - Persediaan) / Liabilitas Lancar
-3. Debt to Equity Ratio
-4. Return on Assets (ROA)
-5. Return on Equity (ROE)
-6. Profit Margin
-
-Berikan hasil dan interpretasi."""
-            )
-            
-            if not ai_response.success:
-                raise Exception(ai_response.error)
-            
-            embed = Helpers.create_success_embed(
-                title="Analisis Rasio Keuangan",
-                description=Helpers.truncate(ai_response.content, 4000)
-            )
-            
-            await loading.delete()
-            await ctx.send(embed=embed)
-            
-            await self.bot.log_usage(ctx.author.id, "rasio", "finance", True)
-            await self.bot.file_handler.delete_file(file_path)
-            
-        except Exception as e:
-            logger.error(f"Error calculating ratios: {e}")
-            await loading.delete()
-            embed = Helpers.create_error_embed(
-                title="Error Menghitung Rasio",
-                description=f"```{str(e)[:500]}```"
-            )
-            await ctx.send(embed=embed)
+            await ctx.send(embed=Helpers.create_error_embed("Error Depresiasi", f"```{str(e)}```"))
     
     # =========================================================================
     # HELPER METHODS
     # =========================================================================
     
-    def _sum_nested_dict(self, d: dict) -> float:
-        """Sum all numeric values in nested dict"""
-        total = 0
-        for value in d.values():
-            if isinstance(value, dict):
-                total += self._sum_nested_dict(value)
-            elif isinstance(value, (int, float)):
-                total += value
-        return total
+    def _parse_income_statement_details(self, details: str) -> dict:
+        """Parse income statement from natural language"""
+        data = {
+            "company": "Perusahaan",
+            "period": "2024",
+            "pendapatan": 0,
+            "hpp": 0,
+            "beban_operasional": {},
+            "laba_bersih": 0
+        }
+        
+        # Extract company name
+        if "PT " in details.upper():
+            match = re.search(r'PT\.?\s*([A-Za-z\s]+)', details, re.IGNORECASE)
+            if match:
+                data["company"] = f"PT {match.group(1).strip()}"
+        
+        # Extract period
+        period_match = re.search(r'periode\s+([A-Za-z\-\s]+\d{4})', details, re.IGNORECASE)
+        if period_match:
+            data["period"] = period_match.group(1).strip()
+        
+        # Parse numbers (simplified)
+        def parse_amount(text, keyword):
+            pattern = rf'{keyword}[:\s]+(\d+(?:[.,]\d+)?)\s*(?:jt|juta|M|miliar)?'
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                num = float(match.group(1).replace(',', '.'))
+                # Check for jt/M suffix
+                if 'jt' in text[match.end():match.end()+5].lower() or 'juta' in text[match.end():match.end()+10].lower():
+                    num *= 1_000_000
+                elif 'm' in text[match.end():match.end()+3].lower() or 'miliar' in text[match.end():match.end()+10].lower():
+                    num *= 1_000_000_000
+                return num
+            return 0
+        
+        data["pendapatan"] = parse_amount(details, "penjualan") or parse_amount(details, "pendapatan")
+        data["hpp"] = parse_amount(details, "hpp") or parse_amount(details, "harga pokok")
+        data["beban_operasional"] = {
+            "gaji": parse_amount(details, "gaji") or parse_amount(details, "beban gaji"),
+            "sewa": parse_amount(details, "sewa") or parse_amount(details, "beban sewa"),
+            "listrik": parse_amount(details, "listrik") or parse_amount(details, "beban listrik"),
+            "marketing": parse_amount(details, "marketing") or parse_amount(details, "beban marketing"),
+            "lainnya": parse_amount(details, "lainnya") or parse_amount(details, "beban lain"),
+        }
+        
+        # Calculate laba bersih
+        total_beban = sum(data["beban_operasional"].values())
+        laba_kotor = data["pendapatan"] - data["hpp"]
+        data["laba_bersih"] = laba_kotor - total_beban
+        
+        return data
     
     async def _create_balance_sheet_structure(self, data: dict) -> dict:
-        """Create balance sheet Excel structure"""
         return {
             "sheets": [{
                 "name": "Neraca",
+                "headers": [],
                 "data": [
                     ["NERACA (BALANCE SHEET)", "", ""],
                     [data.get('company', ''), "", ""],
                     [f"Per: {data.get('date', '')}", "", ""],
                     ["", "", ""],
                     ["ASET", "", ""],
-                    ["Aset Lancar:", "", ""],
-                    ["  Kas dan Setara Kas", "", 0],
-                    ["  Piutang Usaha", "", 0],
-                    ["  Persediaan", "", 0],
-                    ["Total Aset Lancar", "", "=SUM(C7:C9)"],
-                    ["", "", ""],
-                    ["Aset Tidak Lancar:", "", ""],
-                    ["  Aset Tetap", "", 0],
-                    ["  Akumulasi Penyusutan", "", 0],
-                    ["Total Aset Tidak Lancar", "", "=C13+C14"],
-                    ["", "", ""],
-                    ["TOTAL ASET", "", "=C10+C15"],
+                    ["Kas dan Setara Kas", "", data.get('assets', {}).get('kas', 0)],
+                    ["Piutang Usaha", "", data.get('assets', {}).get('piutang', 0)],
+                    ["Persediaan", "", data.get('assets', {}).get('persediaan', 0)],
+                    ["Aset Tetap", "", data.get('assets', {}).get('aset_tetap', 0)],
+                    ["TOTAL ASET", "", "=SUM(C6:C9)"],
                     ["", "", ""],
                     ["LIABILITAS", "", ""],
-                    ["Liabilitas Jangka Pendek:", "", ""],
-                    ["  Hutang Usaha", "", 0],
-                    ["Total Liabilitas Jangka Pendek", "", "=C21"],
+                    ["Hutang Usaha", "", data.get('liabilities', {}).get('hutang_usaha', 0)],
+                    ["Hutang Bank", "", data.get('liabilities', {}).get('hutang_bank', 0)],
+                    ["TOTAL LIABILITAS", "", "=SUM(C13:C14)"],
                     ["", "", ""],
                     ["EKUITAS", "", ""],
-                    ["  Modal", "", 0],
-                    ["  Laba Ditahan", "", 0],
-                    ["Total Ekuitas", "", "=C25+C26"],
+                    ["Modal", "", data.get('equity', {}).get('modal', 0)],
+                    ["Laba Ditahan", "", data.get('equity', {}).get('laba_ditahan', 0)],
+                    ["TOTAL EKUITAS", "", "=SUM(C18:C19)"],
                     ["", "", ""],
-                    ["TOTAL LIABILITAS & EKUITAS", "", "=C22+C27"],
+                    ["TOTAL LIABILITAS & EKUITAS", "", "=C15+C20"],
                 ],
                 "column_widths": {"A": 35, "B": 5, "C": 20},
-                "formatting": {
-                    "currency_columns": ["C"]
-                }
+                "formatting": {"currency_columns": ["C"]}
             }]
         }
     
     async def _create_income_statement_structure(self, data: dict) -> dict:
-        """Create income statement structure"""
+        beban = data.get('beban_operasional', {})
+        
         return {
             "sheets": [{
                 "name": "Laba Rugi",
+                "headers": [],
                 "data": [
                     ["LAPORAN LABA RUGI", ""],
                     [data.get('company', ''), ""],
                     [f"Periode: {data.get('period', '')}", ""],
                     ["", ""],
-                    ["Pendapatan", 0],
-                    ["Harga Pokok Penjualan", 0],
-                    ["Laba Kotor", "=B5-B6"],
+                    ["Pendapatan / Penjualan", data.get('pendapatan', 0)],
+                    ["Harga Pokok Penjualan", data.get('hpp', 0)],
+                    ["LABA KOTOR", "=B5-B6"],
                     ["", ""],
                     ["Beban Operasional:", ""],
-                    ["  Beban Gaji", 0],
-                    ["  Beban Sewa", 0],
-                    ["  Beban Lain-lain", 0],
-                    ["Total Beban Operasional", "=SUM(B10:B12)"],
+                    ["  Beban Gaji", beban.get('gaji', 0)],
+                    ["  Beban Sewa", beban.get('sewa', 0)],
+                    ["  Beban Listrik", beban.get('listrik', 0)],
+                    ["  Beban Marketing", beban.get('marketing', 0)],
+                    ["  Beban Lainnya", beban.get('lainnya', 0)],
+                    ["Total Beban Operasional", "=SUM(B10:B14)"],
                     ["", ""],
-                    ["Laba Operasional", "=B7-B13"],
+                    ["LABA OPERASIONAL", "=B7-B15"],
                     ["", ""],
-                    ["Pendapatan/Beban Lain-lain", 0],
+                    ["Pajak Penghasilan (22%)", "=B17*0.22"],
                     ["", ""],
-                    ["Laba Sebelum Pajak", "=B15+B17"],
-                    ["Pajak Penghasilan", "=B19*0.22"],
-                    ["", ""],
-                    ["LABA BERSIH", "=B19-B20"],
+                    ["LABA BERSIH", "=B17-B19"],
                 ],
                 "column_widths": {"A": 35, "B": 20},
-                "formatting": {
-                    "currency_columns": ["B"]
-                }
+                "formatting": {"currency_columns": ["B"]}
             }]
         }
     
     async def _create_cashflow_structure(self, data: dict) -> dict:
-        """Create cash flow statement structure"""
         return {
             "sheets": [{
                 "name": "Arus Kas",
+                "headers": [],
                 "data": [
                     ["LAPORAN ARUS KAS", ""],
                     [data.get('company', ''), ""],
@@ -616,25 +471,23 @@ Berikan hasil dan interpretasi."""
                     ["  Penerimaan dari Pelanggan", 0],
                     ["  Pembayaran kepada Pemasok", 0],
                     ["  Pembayaran Beban Operasi", 0],
-                    ["Kas Bersih dari Aktivitas Operasi", "=B6+B7+B8"],
+                    ["Kas Bersih Aktivitas Operasi", "=SUM(B6:B8)"],
                     ["", ""],
                     ["ARUS KAS DARI AKTIVITAS INVESTASI", ""],
                     ["  Pembelian Aset Tetap", 0],
-                    ["Kas Bersih dari Aktivitas Investasi", "=B12"],
+                    ["Kas Bersih Aktivitas Investasi", "=B12"],
                     ["", ""],
                     ["ARUS KAS DARI AKTIVITAS PENDANAAN", ""],
                     ["  Penerimaan Pinjaman", 0],
                     ["  Pembayaran Dividen", 0],
-                    ["Kas Bersih dari Aktivitas Pendanaan", "=B16+B17"],
+                    ["Kas Bersih Aktivitas Pendanaan", "=SUM(B16:B17)"],
                     ["", ""],
-                    ["KENAIKAN/PENURUNAN KAS BERSIH", "=B9+B13+B18"],
-                    ["Kas Awal Periode", 0],
-                    ["KAS AKHIR PERIODE", "=B20+B21"],
+                    ["KENAIKAN/PENURUNAN KAS", "=B9+B13+B18"],
+                    ["Kas Awal", 0],
+                    ["KAS AKHIR", "=B20+B21"],
                 ],
                 "column_widths": {"A": 40, "B": 20},
-                "formatting": {
-                    "currency_columns": ["B"]
-                }
+                "formatting": {"currency_columns": ["B"]}
             }]
         }
 
