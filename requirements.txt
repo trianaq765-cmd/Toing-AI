@@ -4,7 +4,7 @@ python-dotenv==1.0.0
 
 # AI - Gratis
 google-generativeai==0.5.4
-groq==0.5.0
+groq>=0.11.0
 
 # Excel Processing
 openpyxl==3.1.2
